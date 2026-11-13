@@ -18,7 +18,7 @@
   }
 
   /* ══════════════════════════════════════════════
-     GATE SCREEN — mimic Happ VPN's config page look
+     GATE SCREEN
      ══════════════════════════════════════════════ */
   #gate {
     position:fixed; inset:0;
@@ -58,10 +58,13 @@
     position:relative; width:200px; height:200px;
     display:flex; align-items:center; justify-content:center;
   }
+  
+  /* แก้ไข: ใส pointer-events: none; ให้วงกลม เพื่อไม่ให้มันบังการกดปุ่ม */
   .ring::before, .ring::after {
     content:""; position:absolute; border-radius:50%;
     border:1px solid rgba(255,77,109,.25);
     animation:spin 8s linear infinite;
+    pointer-events: none; 
   }
   .ring::before { inset:0; }
   .ring::after { inset:16px; border-color:rgba(255,77,109,.15);
@@ -75,6 +78,8 @@
     letter-spacing:.22em; cursor:pointer;
     box-shadow:0 0 60px rgba(255,77,109,.55), inset 0 -6px 20px rgba(0,0,0,.3);
     transition:transform .12s;
+    position: relative;
+    z-index: 10; /* ดันปุ่มขึ้นมาให้อยู่บนสุด */
   }
   #inject:active { transform:scale(.94); }
 
@@ -218,10 +223,6 @@
 (function(){
   'use strict';
 
-  /* ══════════════════════════════════════════════
-     BRIDGE DETECTION — หา JS interface ที่ Happ VPN expose
-     (Happ บางเวอร์ชันมี android/js bridge สำหรับ config parse)
-     ══════════════════════════════════════════════ */
   const NAMES = ['Happ','happ','AndroidBridge','Android',
                  'NativeBridge','JSBridge','ModMenu','Native'];
   let BRIDGE = null, BRIDGE_NAME = 'none';
@@ -251,9 +252,6 @@
     ? 'READY (no bridge)'
     : 'READY · BRIDGE OK';
 
-  /* ══════════════════════════════════════════════
-     UI ELEMENTS
-     ══════════════════════════════════════════════ */
   const gate = document.getElementById('gate');
   const inject = document.getElementById('inject');
   const bubble = document.getElementById('bubble');
@@ -273,9 +271,6 @@
     call('showToast', msg);
   }
 
-  /* ══════════════════════════════════════════════
-     STATE — persist ด้วย localStorage (Happ WebView เก็บไว้)
-     ══════════════════════════════════════════════ */
   const STORE_KEY = 'crow_state_v1';
   let state = {};
   try { state = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); } catch(_){ state = {}; }
@@ -285,10 +280,16 @@
   }
 
   /* ══════════════════════════════════════════════
-     INJECT → MENU
+     INJECT → MENU (แก้ให้ปุ่มกดติดชัวร์ๆ)
      ══════════════════════════════════════════════ */
   inject.addEventListener('click', () => {
-    gate.classList.add('hide');
+    console.log('Inject Clicked!');
+    
+    // ทำให้หน้า Gate หายไปเลย ไม่ให้มาบัง
+    gate.style.opacity = '0';
+    gate.style.pointerEvents = 'none';
+    setTimeout(() => { gate.style.display = 'none'; }, 350);
+
     bubble.classList.add('show');
     panel.classList.add('show');
 
@@ -296,15 +297,11 @@
     call('inject');
     call('menuLoaded');
 
-    // haptic ถ้ามี
     if (navigator.vibrate) navigator.vibrate(30);
 
     toast('injected');
   });
 
-  /* ══════════════════════════════════════════════
-     BUBBLE — drag + tap
-     ══════════════════════════════════════════════ */
   let bMoved = false, bDown = null;
   bubble.addEventListener('pointerdown', e => {
     bMoved = false;
@@ -325,9 +322,6 @@
     bDown = null;
   });
 
-  /* ══════════════════════════════════════════════
-     PANEL — drag by header
-     ══════════════════════════════════════════════ */
   let drag = null;
   dragHandle.addEventListener('pointerdown', e => {
     drag = { x: e.clientX, y: e.clientY,
@@ -342,9 +336,6 @@
   });
   dragHandle.addEventListener('pointerup', () => drag = null);
 
-  /* ══════════════════════════════════════════════
-     TOGGLES — restore + save
-     ══════════════════════════════════════════════ */
   document.querySelectorAll('.sw').forEach(sw => {
     const k = sw.dataset.k;
     if (state[k]) sw.classList.add('on');
@@ -362,20 +353,18 @@
         call('setToggle', k, on);
         call('set', k, on);
         call(k, on);
-        console.log('[crow]', k, '→', on);
       }, 80 + Math.random() * 120);
     });
   });
 
-  /* ══════════════════════════════════════════════
-     MIN / CLOSE
-     ══════════════════════════════════════════════ */
   btnMin.addEventListener('click', () => panel.classList.remove('show'));
 
   btnClose.addEventListener('click', () => {
     panel.classList.remove('show');
     bubble.classList.remove('show');
-    gate.classList.remove('hide');
+    gate.style.display = 'flex'; // คืนค่าหน้า Gate
+    setTimeout(() => { gate.style.opacity = '1'; gate.style.pointerEvents = 'auto'; }, 10);
+    
     document.querySelectorAll('.sw').forEach(sw => {
       sw.classList.remove('on');
       const k = sw.dataset.k;
@@ -386,14 +375,10 @@
     saveState();
   });
 
-  /* ══════════════════════════════════════════════
-     START GAME — intent:// เปิด Free Fire / MAX
-     ══════════════════════════════════════════════ */
   const PKG_FF  = 'com.dts.freefireth';
   const PKG_FFM = 'com.dts.freefiremax';
 
   function launchGame() {
-    // 1) ถ้า Happ มี launcher → ใช้ของ Happ
     const bridgeLaunched =
       call('launchGame', PKG_FF) ||
       call('launch', PKG_FF) ||
@@ -402,7 +387,6 @@
 
     if (bridgeLaunched) { toast('launching…'); return; }
 
-    // 2) intent:// scheme — Android WebView รองรับ
     toast('launching…');
     try {
       const a = document.createElement('a');
@@ -412,7 +396,6 @@
       a.click();
       a.remove();
 
-      // fallback Free Fire MAX หลัง 1.5 วิ ถ้ายังไม่เด้ง
       setTimeout(() => {
         try {
           const b = document.createElement('a');
@@ -428,9 +411,6 @@
 
   startBtn.addEventListener('click', launchGame);
 
-  /* ══════════════════════════════════════════════
-     MESSAGE CHANNEL — Happ → WebView
-     ══════════════════════════════════════════════ */
   window.addEventListener('message', e => {
     try {
       const d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
@@ -448,9 +428,6 @@
     }
   } catch(_){}
 
-  /* ══════════════════════════════════════════════
-     AUTO-FULLSCREEN feel — ซ่อน scroll bar, ล็อค orientation
-     ══════════════════════════════════════════════ */
   window.addEventListener('orientationchange', () => {
     setTimeout(() => window.scrollTo(0, 0), 100);
   });
